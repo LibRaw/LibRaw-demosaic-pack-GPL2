@@ -27,9 +27,11 @@ void CLASS afd_interpolate_pl(int afd_passes, int clip_on)
   double v0, v1, v2, dG, dC0, dC1, dC2, dC3, dC4, temp;
   double ws, w0, w1, w2, w3, dt;
   clock_t t1, t2;
+#ifdef DCRAW_VERBOSE
   if (verbose) {
     fprintf(stderr,_("AFD interpolation with pattern matching...\n"));
     fprintf(stderr,_("\tafd_passes, clip_on = %d, %d\n"),afd_passes,clip_on); }
+#endif
   t1 = clock();
 
   // allocate work with boundary
@@ -215,7 +217,9 @@ void CLASS afd_interpolate_pl(int afd_passes, int clip_on)
   // Done
   t2 = clock();
   dt = ((double)(t2-t1)) / CLOCKS_PER_SEC;
+#ifdef DCRAW_VERBOSE
   if (verbose) fprintf(stderr,_("\telapsed time = %5.3fs\n"),dt);
+#endif
 }
 
 //void CLASS afd_noise_filter_pl()

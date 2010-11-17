@@ -26,7 +26,9 @@ void CLASS lmmse_interpolate(int gamma_apply)
   char  *buffer;
   clock_t t1, t2;
   double dt;
+#ifdef DCRAW_VERBOSE
   if (verbose) fprintf(stderr,_("LMMSE interpolation...\n"));
+#endif
   t1 = clock();
   // allocate work with boundary
   ba = 10;
@@ -270,5 +272,7 @@ void CLASS lmmse_interpolate(int gamma_apply)
   free(buffer);
   t2 = clock();
   dt = ((double)(t2-t1)) / CLOCKS_PER_SEC;
+#ifdef DCRAW_VERBOSE
   if (verbose) fprintf(stderr,_("\telapsed time     = %5.3fs\n"),dt);
+#endif
 }

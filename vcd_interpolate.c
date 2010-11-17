@@ -320,6 +320,7 @@ void CLASS vcd_interpolate(int ahd_cutoff)
 				}
 
 				/* Compute statistics */
+#ifdef DCRAW_VERBOSE
 				if (verbose) {
 					if (ahd_cutoff > 0) {
 						T_cnt = AHD_cnt + LH_cnt + LV_cnt + varH_cnt + varV_cnt + varD_cnt;
@@ -346,5 +347,6 @@ void CLASS vcd_interpolate(int ahd_cutoff)
 				t2 = clock();
 				dt = ((double)(t2-t1)) / CLOCKS_PER_SEC;
 				if (verbose) fprintf(stderr,_("\telapsed time     = %5.3fs\n"),dt);
+#endif
 }
 #undef PIX_SORT

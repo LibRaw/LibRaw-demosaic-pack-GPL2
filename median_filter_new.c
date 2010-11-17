@@ -44,8 +44,10 @@ void CLASS median_filter_new()
   /* Allocate buffer for 3x3 median filter */
   mf = (int (*)[3]) calloc(width*height, sizeof *mf);
   for (pass=1; pass <= med_passes; pass++) {
+#ifdef DCRAW_VERBOSE
     if (verbose)
       fprintf (stderr,_("3x3 differential median filter pass %d...\n"), pass);
+#endif
     for (c=0; c < 3; c+=2) {
       /* Compute median(R-G) and median(B-G) */ 
       for (indx=0; indx < height*width; indx++)

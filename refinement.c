@@ -37,7 +37,9 @@ void CLASS refinement()
   double dL, dR, dU, dD, dt;
   clock_t t1, t2;
 
+#ifdef DCRAW_VERBOSE
   if (verbose) fprintf(stderr,_("Post-demosaic refinement..."));
+#endif
   t1 = clock();
   w1 = width;
   w2 = 2*w1;
@@ -99,5 +101,7 @@ void CLASS refinement()
   /* Done */
   t2 = clock();
   dt = ((double)(t2-t1)) / CLOCKS_PER_SEC;
+#ifdef DCRAW_VERBOSE
   if (verbose) fprintf(stderr,_("\telapsed time     = %5.3fs\n"),dt);
+#endif
 }

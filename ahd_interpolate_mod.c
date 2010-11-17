@@ -49,7 +49,9 @@ void CLASS ahd_interpolate_mod()
 	short (*lab)[TS][TS][3], (*lix)[3];
 	char (*homo)[TS][TS], *buffer;
 
+#ifdef DCRAW_VERBOSE
 	if (verbose) fprintf (stderr,_("AHD interpolation (modified for anti-aliasing)...\n"));
+#endif
 
 	for (i=0; i < 0x10000; i++) {
 		r = i / 65535.0;

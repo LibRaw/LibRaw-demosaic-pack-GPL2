@@ -88,7 +88,9 @@ void CLASS es_median_filter()
 /* 	pc[0][1] = p[4]; */
 /*       } */
     /* Apply 5x5 median fileter */
+#ifdef LIBRAW_USE_OPENMP
 #pragma omp parallel for private(row,col,pc)
+#endif
     for (row=2; row < height-2; row++)
       for (col=2; col < width-2; col++) {
 	pc = mf + row*width+col;

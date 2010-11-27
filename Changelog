@@ -1,3 +1,8 @@
+2010-11-27 Alex Tutubalin <lexa@lexa.ru>
+	* fixed bug with allocation size in lmmse_interpolate
+	* changed malloc to calloc to make valgrind happy with uninitialized
+	  values
+
 2010-11-20 Alex Tutubalin <lexa@lexa.ru>
 	   * OpenMP with LIBRAW_USE_OPENMP
 	   

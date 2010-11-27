@@ -35,9 +35,9 @@ void CLASS lmmse_interpolate(int gamma_apply)
   rr1 = height + 2*ba;
   cc1 = width + 2*ba;
   if (gamma_apply)
-    buffer = (char *)malloc(rr1*cc1*24+65535*4);
+    buffer = (char *)calloc(rr1*cc1*6*sizeof(float)+65536*sizeof(float),1);
   else
-    buffer = (char *)malloc(rr1*cc1*24);
+    buffer = (char *)calloc(rr1*cc1*6*sizeof(float),1);
   merror(buffer,"lmmse_interpolate()");
   qix = (float (*)[6])buffer;
   if (gamma_apply) {

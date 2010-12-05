@@ -23,6 +23,7 @@
 
 
 
+
 /* RESTRICTED code starts here */
 
 void CLASS foveon_decoder (unsigned size, unsigned code)
@@ -39,8 +40,12 @@ void CLASS foveon_decoder (unsigned size, unsigned code)
   }
   cur = free_decode++;
   if (free_decode > first_decode+2048) {
+#ifdef LIBRAW_LIBRARY_BUILD
+      throw LIBRAW_EXCEPTION_DECODE_RAW;
+#else
     fprintf (stderr,_("%s: decoder table overflow\n"), ifname);
     longjmp (failure, 2);
+#endif
   }
   if (code)
     for (i=0; i < size; i++)
@@ -55,6 +60,66 @@ void CLASS foveon_decoder (unsigned size, unsigned code)
   foveon_decoder (size, code);
   cur->branch[1] = free_decode;
   foveon_decoder (size, code+1);
+}
+
+#define T imgdata.thumbnail
+#define ID libraw_internal_data.internal_data
+
+void LibRaw::foveon_thumb_loader (void)
+{
+    unsigned bwide, row, col, bitbuf=0, bit=1, c, i;
+    struct decode *dindex;
+    short pred[3];
+    
+    if(T.thumb) free(T.thumb);
+    T.thumb = NULL;
+    
+    bwide = get4();
+    if (bwide > 0) 
+        {
+            if (bwide < (unsigned)T.twidth*3) return;
+            T.thumb = (char*)malloc(3*T.twidth * T.theight);
+            merror (T.thumb, "foveon_thumb()");
+            char *buf = (char*)malloc(bwide); 
+            merror (buf, "foveon_thumb()");
+            for (row=0; row < T.theight; row++) 
+                {
+                    ID.input->read(buf, 1, bwide);
+                    memmove(T.thumb+(row*T.twidth*3),buf,T.twidth*3);
+                }
+            free(buf);
+            T.tlength = 3*T.twidth * T.theight;
+            T.tformat = LIBRAW_THUMBNAIL_BITMAP;
+            return;
+        }
+    else 
+        {
+            foveon_decoder (256, 0);
+            T.thumb = (char*)malloc(3*T.twidth * T.theight);
+            char *bufp = T.thumb;
+            merror (T.thumb, "foveon_thumb()");
+            for (row=0; row < T.theight; row++) 
+                {
+                    memset (pred, 0, sizeof pred);
+                    if (!bit) get4();
+                    for (bit=col=0; col < T.twidth; col++)
+                        for(c=0;c<3;c++) 
+                            {
+                                for (dindex=first_decode; dindex->branch[0]; ) 
+                                    {
+                                        if ((bit = (bit-1) & 31) == 31)
+                                            for (i=0; i < 4; i++)
+                                                bitbuf = (bitbuf << 8) + ID.input->get_char();
+                                        dindex = dindex->branch[bitbuf >> bit & 1];
+                                    }
+                                pred[c] += dindex->leaf;
+                                (*bufp++)=pred[c];
+                            }
+                }
+            T.tformat = LIBRAW_THUMBNAIL_BITMAP;
+            T.tlength = 3*T.twidth * T.theight;
+        }
+    return;
 }
 
 void CLASS foveon_thumb()
@@ -200,7 +265,12 @@ void * CLASS foveon_camf_matrix (unsigned dim[3], const char *name)
 	mat[i] = sget4(dp + i*2) & 0xffff;
     return mat;
   }
+#ifdef LIBRAW_LIBRARY_BUILD
+  imgdata.process_warnings |= LIBRAW_WARN_FOVEON_NOMATRIX;
+#endif
+#ifdef DCRAW_VERBOSE
   fprintf (stderr,_("%s: \"%s\" matrix not found!\n"), ifname, name);
+#endif
   return 0;
 }
 
@@ -266,7 +336,10 @@ int CLASS foveon_apply_curve (short *curve, int i)
   return i < 0 ? -curve[1-i] : curve[1+i];
 }
 
-#define image ((short (*)[4]) image)
+#ifdef image
+#undef image
+#endif
+#define image ((short(*)[4]) imgdata.image)
 
 void CLASS foveon_interpolate()
 {
@@ -286,8 +359,13 @@ void CLASS foveon_interpolate()
   char str[128];
   const char* cp;
 
+#ifdef DCRAW_VERBOSE
   if (verbose)
     fprintf (stderr,_("Foveon interpolation...\n"));
+#endif
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,0,9);
+#endif  
 
   foveon_fixed (dscr, 4, "DarkShieldColRange");
   foveon_fixed (ppm[0][0], 27, "PostPolyMatrix");
@@ -313,8 +391,15 @@ void CLASS foveon_interpolate()
     }
 
   if (!(cp = foveon_camf_param ("WhiteBalanceIlluminants", model2)))
-  { fprintf (stderr,_("%s: Invalid white balance \"%s\"\n"), ifname, model2);
-    return; }
+  {
+#ifdef DCRAW_VERBOSE
+ fprintf (stderr,_("%s: Invalid white balance \"%s\"\n"), ifname, model2);
+#endif
+#ifdef LIBRAW_LIBRARY_BUILD
+      imgdata.process_warnings |= LIBRAW_WARN_FOVEON_INVALIDWB;
+#endif
+    return; 
+  }
   foveon_fixed (cam_xyz, 9, cp);
   foveon_fixed (correct, 9,
 	foveon_camf_param ("WhiteBalanceCorrections", model2));
@@ -361,6 +446,9 @@ void CLASS foveon_interpolate()
   sgx = (width + dim[1]-2) / (dim[1]-1);
 
   black = (float (*)[3]) calloc (height, sizeof *black);
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,1,9);
+#endif
   for (row=0; row < height; row++) {
     for (i=0; i < 6; i++)
       ddft[0][0][i] = ddft[1][0][i] +
@@ -407,6 +495,9 @@ void CLASS foveon_interpolate()
   for (row=0; row < height; row++)
     FORC3 black[row][c] += fsum[c]/2 + total[c]/(total[3]*100.0);
 
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,2,9);
+#endif
   for (row=0; row < height; row++) {
     for (i=0; i < 6; i++)
       ddft[0][0][i] = ddft[1][0][i] +
@@ -449,6 +540,9 @@ void CLASS foveon_interpolate()
   free (sgrow);
   free (sgain);
 
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,3,9);
+#endif
   if ((badpix = (unsigned int *) foveon_camf_matrix (dim, "BadPixels"))) {
     for (i=0; i < dim[0]; i++) {
       col = (badpix[i] >> 8 & 0xfff) - keep[0];
@@ -500,6 +594,9 @@ void CLASS foveon_interpolate()
     }
   }
 
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,4,9);
+#endif
   /* Adjust the brighter pixels for better linearity */
   min = 0xffff;
   FORC3 {
@@ -529,6 +626,9 @@ void CLASS foveon_interpolate()
    the sum R+G+B is much less noisy than the individual colors.
    So smooth the hues without smoothing the total.
  */
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,5,9);
+#endif
   for (smlast=-1, row=2; row < height-2; row++) {
     while (smlast < row+2) {
       for (i=0; i < 6; i++)
@@ -575,6 +675,9 @@ void CLASS foveon_interpolate()
     }
   }
 
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,6,9);
+#endif
   /* Transform the image to a different colorspace */
   for (pix=image[0]; pix < image[height*width]; pix+=4) {
     FORC3 pix[c] -= foveon_apply_curve (curve[c], pix[c]);
@@ -607,6 +710,9 @@ void CLASS foveon_interpolate()
 	    (shrink[(row+1)*(width/4)+col][c]*1840 + ipix[c]*141 + 2048) >> 12;
     }
   /* From the 1/4-scale image, smooth right-to-left */
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,7,9);
+#endif
   for (row=0; row < (height & ~3); row++) {
     ipix[0] = ipix[1] = ipix[2] = 0;
     if ((row & 3) == 0)
@@ -652,6 +758,9 @@ void CLASS foveon_interpolate()
   free (smrow[6]);
   for (i=0; i < 8; i++)
     free (curve[i]);
+#ifdef LIBRAW_LIBRARY_BUILD
+  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,8,9);
+#endif
 
   /* Trim off the black border */
   active[1] -= keep[1];

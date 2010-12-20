@@ -1,3 +1,5 @@
+2010-12-20 Alex Tutubalin <lexa@lexa.ru>
+	* Fixed crash on Sigma DPx files in Foveon code
 2010-12-05 Alex Tutubalin <lexa@lexa.ru>
 	* foveon processing code from dcraw
 

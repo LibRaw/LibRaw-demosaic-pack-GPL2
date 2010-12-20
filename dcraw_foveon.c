@@ -278,7 +278,6 @@ int CLASS foveon_fixed (void *ptr, int size, const char *name)
 {
   void *dp;
   unsigned dim[3];
-
   dp = foveon_camf_matrix (dim, name);
   if (!dp) return 0;
   memcpy (ptr, dp, size*4);
@@ -383,11 +382,13 @@ void CLASS foveon_interpolate()
   if (!foveon_camf_param ("IncludeBlocks", "DarkDrift")
 	 || !foveon_fixed (ddft[1][0], 12, "DarkDrift"))
     for (i=0; i < 2; i++) {
-      foveon_fixed (dstb, 4, i ? "DarkShieldBottom":"DarkShieldTop");
-      for (row = dstb[1]; row <= dstb[3]; row++)
-	for (col = dstb[0]; col <= dstb[2]; col++)
-	  FORC3 ddft[i+1][c][1] += (short) image[row*width+col][c];
-      FORC3 ddft[i+1][c][1] /= (dstb[3]-dstb[1]+1) * (dstb[2]-dstb[0]+1);
+      if(foveon_fixed (dstb, 4, i ? "DarkShieldBottom":"DarkShieldTop"))
+          {
+              for (row = dstb[1]; row <= dstb[3]; row++)
+                  for (col = dstb[0]; col <= dstb[2]; col++)
+                      FORC3 ddft[i+1][c][1] += (short) image[row*width+col][c];
+              FORC3 ddft[i+1][c][1] /= (dstb[3]-dstb[1]+1) * (dstb[2]-dstb[0]+1);
+          }
     }
 
   if (!(cp = foveon_camf_param ("WhiteBalanceIlluminants", model2)))

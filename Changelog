@@ -1,3 +1,5 @@
+2011-01-10 Alex Tutubalin <lexa@lexa.ru>
+	* pragma omp changed in median filter 
 2010-12-20 Alex Tutubalin <lexa@lexa.ru>
 	* Fixed crash on Sigma DPx files in Foveon code
 2010-12-05 Alex Tutubalin <lexa@lexa.ru>

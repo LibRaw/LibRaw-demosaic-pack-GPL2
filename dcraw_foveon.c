@@ -1,6 +1,6 @@
 /*
    dcraw.c -- Dave Coffin's raw photo decoder
-   Copyright 1997-2010 by Dave Coffin, dcoffin a cybercom o net
+   Copyright 1997-2012 by Dave Coffin, dcoffin a cybercom o net
 
    This is a command-line ANSI C program to convert raw photos from
    any digital camera on any computer running any operating system.
@@ -19,10 +19,11 @@
    *If you have not modified dcraw.c in any way, a link to my
    homepage qualifies as "full source code".
 
+   $Revision: 1.449 $
+   $Date: 2012/06/26 02:43:41 $
  */
 
-
-
+#define getbits(n) getbithuff(n,0)
 
 /* RESTRICTED code starts here */
 
@@ -62,6 +63,7 @@ void CLASS foveon_decoder (unsigned size, unsigned code)
   foveon_decoder (size, code+1);
 }
 
+#ifdef LIBRAW_LIBRARY_BUILD
 #define T imgdata.thumbnail
 #define ID libraw_internal_data.internal_data
 
@@ -121,6 +123,7 @@ void LibRaw::foveon_thumb_loader (void)
         }
     return;
 }
+#endif
 
 void CLASS foveon_thumb()
 {
@@ -161,36 +164,21 @@ void CLASS foveon_thumb()
   }
 }
 
-void CLASS foveon_load_camf()
-{
-  unsigned key, i, val;
-
-  fseek (ifp, meta_offset, SEEK_SET);
-  key = get4();
-  fread (meta_data, 1, meta_length, ifp);
-  for (i=0; i < meta_length; i++) {
-    key = (key * 1597 + 51749) % 244944;
-    val = key * (INT64) 301593171 >> 24;
-    meta_data[i] ^= ((((key << 8) - val) >> 1) + val) >> 17;
-  }
-}
-
-void CLASS foveon_load_raw()
+void CLASS foveon_sd_load_raw()
 {
   struct decode *dindex;
   short diff[1024];
   unsigned bitbuf=0;
-  int pred[3], fixed, row, col, bit=-1, c, i;
+  int pred[3], row, col, bit=-1, c, i;
 
-  fixed = get4();
   read_shorts ((ushort *) diff, 1024);
-  if (!fixed) foveon_decoder (1024, 0);
+  if (!load_flags) foveon_decoder (1024, 0);
 
   for (row=0; row < height; row++) {
     memset (pred, 0, sizeof pred);
-    if (!bit && !fixed && atoi(model+2) < 14) get4();
+    if (!bit && !load_flags && atoi(model+2) < 14) get4();
     for (col=bit=0; col < width; col++) {
-      if (fixed) {
+      if (load_flags) {
 	bitbuf = get4();
 	FORC3 pred[2-c] += diff[bitbuf >> c*10 & 0x3ff];
       }
@@ -207,10 +195,83 @@ void CLASS foveon_load_raw()
       FORC3 image[row*width+col][c] = pred[c];
     }
   }
-  if (document_mode)
-    for (i=0; i < height*width*4; i++)
-      if ((short) image[0][i] < 0) image[0][i] = 0;
-  foveon_load_camf();
+}
+
+void CLASS foveon_huff (ushort *huff)
+{
+  int i, j, clen, code;
+
+  huff[0] = 8;
+  for (i=0; i < 13; i++) {
+    clen = getc(ifp);
+    code = getc(ifp);
+    for (j=0; j < 256 >> clen; )
+      huff[code+ ++j] = clen << 8 | i;
+  }
+  get2();
+}
+
+void CLASS foveon_dp_load_raw()
+{
+  unsigned c, roff[4], row, col, diff;
+  ushort huff[258], vpred, hpred;
+
+  fseek (ifp, 8, SEEK_CUR);
+  foveon_huff (huff);
+  roff[0] = 48;
+  FORC3 roff[c+1] = -(-(roff[c] + get4()) & -16);
+  FORC3 {
+    fseek (ifp, data_offset+roff[c], SEEK_SET);
+    getbits(-1);
+    vpred = 1024;
+    for (row=0; row < height; row++) {
+      for (col=0; col < width; col++) {
+	diff = ljpeg_diff(huff);
+	if (col) hpred += diff;
+	else hpred = vpred += diff;
+	image[row*width+col][c] = hpred;
+      }
+    }
+  }
+}
+
+void CLASS foveon_load_camf()
+{
+  unsigned type, wide, high, i, j, row, col, diff;
+  ushort huff[258], vpred[2][2] = {{512,512},{512,512}}, hpred[2];
+
+  fseek (ifp, meta_offset, SEEK_SET);
+  type = get4();  get4();  get4();
+  wide = get4();
+  high = get4();
+  if (type == 2) {
+    fread (meta_data, 1, meta_length, ifp);
+    for (i=0; i < meta_length; i++) {
+      high = (high * 1597 + 51749) % 244944;
+      wide = high * (INT64) 301593171 >> 24;
+      meta_data[i] ^= ((((high << 8) - wide) >> 1) + wide) >> 17;
+    }
+  } else if (type == 4) {
+    free (meta_data);
+    meta_data = (char *) malloc (meta_length = wide*high*3/2);
+    merror (meta_data, "foveon_load_camf()");
+    foveon_huff (huff);
+    get4();
+    getbits(-1);
+    for (j=row=0; row < high; row++) {
+      for (col=0; col < wide; col++) {
+	diff = ljpeg_diff(huff);
+	if (col < 2) hpred[col] = vpred[row & 1][col] += diff;
+	else         hpred[col & 1] += diff;
+	if (col & 1) {
+	  meta_data[j++] = hpred[0] >> 4;
+	  meta_data[j++] = hpred[0] << 4 | hpred[1] >> 8;
+	  meta_data[j++] = hpred[1];
+        }
+      }
+    }
+  } else
+    fprintf (stderr,_("%s has unknown CAMF type %d.\n"), ifname, type);
 }
 
 const char * CLASS foveon_camf_param (const char *block, const char *param)
@@ -265,12 +326,7 @@ void * CLASS foveon_camf_matrix (unsigned dim[3], const char *name)
 	mat[i] = sget4(dp + i*2) & 0xffff;
     return mat;
   }
-#ifdef LIBRAW_LIBRARY_BUILD
-  imgdata.process_warnings |= LIBRAW_WARN_FOVEON_NOMATRIX;
-#endif
-#ifdef DCRAW_VERBOSE
   fprintf (stderr,_("%s: \"%s\" matrix not found!\n"), ifname, name);
-#endif
   return 0;
 }
 
@@ -278,6 +334,8 @@ int CLASS foveon_fixed (void *ptr, int size, const char *name)
 {
   void *dp;
   unsigned dim[3];
+
+  if (!name) return 0;
   dp = foveon_camf_matrix (dim, name);
   if (!dp) return 0;
   memcpy (ptr, dp, size*4);
@@ -301,21 +359,21 @@ float CLASS foveon_avg (short *pix, int range[2], float cfilt)
 
 short * CLASS foveon_make_curve (double max, double mul, double filt)
 {
-  short *curve;
+  short *t_curve;
   unsigned i, size;
   double x;
 
   if (!filt) filt = 0.8;
   size = 4*M_PI*max / filt;
   if (size == UINT_MAX) size--;
-  curve = (short *) calloc (size+1, sizeof *curve);
-  merror (curve, "foveon_make_curve()");
-  curve[0] = size;
+  t_curve = (short *) calloc (size+1, sizeof *t_curve);
+  merror (t_curve, "foveon_make_curve()");
+  t_curve[0] = size;
   for (i=0; i < size; i++) {
     x = i*filt/max/4;
-    curve[i+1] = (cos(x)+1)/2 * tanh(i*filt/mul) * mul + 0.5;
+    t_curve[i+1] = (cos(x)+1)/2 * tanh(i*filt/mul) * mul + 0.5;
   }
-  return curve;
+  return t_curve;
 }
 
 void CLASS foveon_make_curves
@@ -329,25 +387,29 @@ void CLASS foveon_make_curves
   FORC3 curvep[c] = foveon_make_curve (max, mul[c], filt);
 }
 
-int CLASS foveon_apply_curve (short *curve, int i)
+int CLASS foveon_apply_curve (short *t_curve, int i)
 {
-  if (abs(i) >= curve[0]) return 0;
-  return i < 0 ? -curve[1-i] : curve[1+i];
+  if (abs(i) >= t_curve[0]) return 0;
+  return i < 0 ? -t_curve[1-i] : t_curve[1+i];
 }
 
+#ifdef LIBRAW_LIBRARY_BUILD
 #ifdef image
 #undef image
 #endif
 #define image ((short(*)[4]) imgdata.image)
+#else
+#define image ((short (*)[4]) image)
+#endif
 
 void CLASS foveon_interpolate()
 {
   static const short hood[] = { -1,-1, -1,0, -1,1, 0,-1, 0,1, 1,-1, 1,0, 1,1 };
-  short *pix, prev[3], *curve[8], (*shrink)[3];
+  short *pix, prev[3], *t_curve[8], (*t_shrink)[3];
   float cfilt=0, ddft[3][3][2], ppm[3][3][3];
   float cam_xyz[3][3], correct[3][3], last[3][3], trans[3][3];
   float chroma_dq[3], color_dq[3], diag[3][3], div[3];
-  float (*black)[3], (*sgain)[3], (*sgrow)[3];
+  float (*t_black)[3], (*sgain)[3], (*sgrow)[3];
   float fsum[3], val, frow, num;
   int row, col, c, i, j, diff, sgx, irow, sum, min, max, limit;
   int dscr[2][2], dstb[4], (*smrow[7])[3], total[4], ipix[3];
@@ -358,14 +420,10 @@ void CLASS foveon_interpolate()
   char str[128];
   const char* cp;
 
-#ifdef DCRAW_VERBOSE
   if (verbose)
     fprintf (stderr,_("Foveon interpolation...\n"));
-#endif
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,0,9);
-#endif  
 
+  foveon_load_camf();
   foveon_fixed (dscr, 4, "DarkShieldColRange");
   foveon_fixed (ppm[0][0], 27, "PostPolyMatrix");
   foveon_fixed (satlev, 3, "SaturationLevel");
@@ -382,25 +440,16 @@ void CLASS foveon_interpolate()
   if (!foveon_camf_param ("IncludeBlocks", "DarkDrift")
 	 || !foveon_fixed (ddft[1][0], 12, "DarkDrift"))
     for (i=0; i < 2; i++) {
-      if(foveon_fixed (dstb, 4, i ? "DarkShieldBottom":"DarkShieldTop"))
-          {
-              for (row = dstb[1]; row <= dstb[3]; row++)
-                  for (col = dstb[0]; col <= dstb[2]; col++)
-                      FORC3 ddft[i+1][c][1] += (short) image[row*width+col][c];
-              FORC3 ddft[i+1][c][1] /= (dstb[3]-dstb[1]+1) * (dstb[2]-dstb[0]+1);
-          }
+      foveon_fixed (dstb, 4, i ? "DarkShieldBottom":"DarkShieldTop");
+      for (row = dstb[1]; row <= dstb[3]; row++)
+	for (col = dstb[0]; col <= dstb[2]; col++)
+	  FORC3 ddft[i+1][c][1] += (short) image[row*width+col][c];
+      FORC3 ddft[i+1][c][1] /= (dstb[3]-dstb[1]+1) * (dstb[2]-dstb[0]+1);
     }
 
   if (!(cp = foveon_camf_param ("WhiteBalanceIlluminants", model2)))
-  {
-#ifdef DCRAW_VERBOSE
- fprintf (stderr,_("%s: Invalid white balance \"%s\"\n"), ifname, model2);
-#endif
-#ifdef LIBRAW_LIBRARY_BUILD
-      imgdata.process_warnings |= LIBRAW_WARN_FOVEON_INVALIDWB;
-#endif
-    return; 
-  }
+  { fprintf (stderr,_("%s: Invalid white balance \"%s\"\n"), ifname, model2);
+    return; }
   foveon_fixed (cam_xyz, 9, cp);
   foveon_fixed (correct, 9,
 	foveon_camf_param ("WhiteBalanceCorrections", model2));
@@ -434,58 +483,55 @@ void CLASS foveon_interpolate()
     for (j=0; j < 3; j++)
       FORC3 trans[i][j] += (i==c ? 32 : -1) * last[c][j] / 30;
 
-  foveon_make_curves (curve, color_dq, div, cfilt);
+  foveon_make_curves (t_curve, color_dq, div, cfilt);
   FORC3 chroma_dq[c] /= 3;
-  foveon_make_curves (curve+3, chroma_dq, div, cfilt);
+  foveon_make_curves (t_curve+3, chroma_dq, div, cfilt);
   FORC3 dsum += chroma_dq[c] / div[c];
-  curve[6] = foveon_make_curve (dsum, dsum, cfilt);
-  curve[7] = foveon_make_curve (dsum*2, dsum*2, cfilt);
+  t_curve[6] = foveon_make_curve (dsum, dsum, cfilt);
+  t_curve[7] = foveon_make_curve (dsum*2, dsum*2, cfilt);
 
   sgain = (float (*)[3]) foveon_camf_matrix (dim, "SpatialGain");
   if (!sgain) return;
   sgrow = (float (*)[3]) calloc (dim[1], sizeof *sgrow);
   sgx = (width + dim[1]-2) / (dim[1]-1);
 
-  black = (float (*)[3]) calloc (height, sizeof *black);
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,1,9);
-#endif
+  t_black = (float (*)[3]) calloc (height, sizeof *t_black);
   for (row=0; row < height; row++) {
     for (i=0; i < 6; i++)
       ddft[0][0][i] = ddft[1][0][i] +
 	row / (height-1.0) * (ddft[2][0][i] - ddft[1][0][i]);
-    FORC3 black[row][c] =
+    FORC3 t_black[row][c] =
  	( foveon_avg (image[row*width]+c, dscr[0], cfilt) +
 	  foveon_avg (image[row*width]+c, dscr[1], cfilt) * 3
 	  - ddft[0][c][0] ) / 4 - ddft[0][c][1];
   }
-  memcpy (black, black+8, sizeof *black*8);
-  memcpy (black+height-11, black+height-22, 11*sizeof *black);
-  memcpy (last, black, sizeof last);
+  memcpy (t_black, t_black+8, sizeof *t_black*8);
+  memcpy (t_black+height-11, t_black+height-22, 11*sizeof *t_black);
+  memcpy (last, t_black, sizeof last);
 
   for (row=1; row < height-1; row++) {
     FORC3 if (last[1][c] > last[0][c]) {
 	if (last[1][c] > last[2][c])
-	  black[row][c] = (last[0][c] > last[2][c]) ? last[0][c]:last[2][c];
+	  t_black[row][c] = (last[0][c] > last[2][c]) ? last[0][c]:last[2][c];
       } else
 	if (last[1][c] < last[2][c])
-	  black[row][c] = (last[0][c] < last[2][c]) ? last[0][c]:last[2][c];
+	  t_black[row][c] = (last[0][c] < last[2][c]) ? last[0][c]:last[2][c];
     memmove (last, last+1, 2*sizeof last[0]);
-    memcpy (last[2], black[row+1], sizeof last[2]);
+    memcpy (last[2], t_black[row+1], sizeof last[2]);
   }
-  FORC3 black[row][c] = (last[0][c] + last[1][c])/2;
-  FORC3 black[0][c] = (black[1][c] + black[3][c])/2;
+  FORC3 t_black[row][c] = (last[0][c] + last[1][c])/2;
+  FORC3 t_black[0][c] = (t_black[1][c] + t_black[3][c])/2;
 
   val = 1 - exp(-1/24.0);
-  memcpy (fsum, black, sizeof fsum);
+  memcpy (fsum, t_black, sizeof fsum);
   for (row=1; row < height; row++)
-    FORC3 fsum[c] += black[row][c] =
-	(black[row][c] - black[row-1][c])*val + black[row-1][c];
-  memcpy (last[0], black[height-1], sizeof last[0]);
+    FORC3 fsum[c] += t_black[row][c] =
+	(t_black[row][c] - t_black[row-1][c])*val + t_black[row-1][c];
+  memcpy (last[0], t_black[height-1], sizeof last[0]);
   FORC3 fsum[c] /= height;
   for (row = height; row--; )
-    FORC3 last[0][c] = black[row][c] =
-	(black[row][c] - fsum[c] - last[0][c])*val + last[0][c];
+    FORC3 last[0][c] = t_black[row][c] =
+	(t_black[row][c] - fsum[c] - last[0][c])*val + last[0][c];
 
   memset (total, 0, sizeof total);
   for (row=2; row < height; row+=4)
@@ -494,11 +540,8 @@ void CLASS foveon_interpolate()
       total[3]++;
     }
   for (row=0; row < height; row++)
-    FORC3 black[row][c] += fsum[c]/2 + total[c]/(total[3]*100.0);
+    FORC3 t_black[row][c] += fsum[c]/2 + total[c]/(total[3]*100.0);
 
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,2,9);
-#endif
   for (row=0; row < height; row++) {
     for (i=0; i < 6; i++)
       ddft[0][0][i] = ddft[1][0][i] +
@@ -517,7 +560,7 @@ void CLASS foveon_interpolate()
 	prev[c] = pix[c];
 	ipix[c] = pix[c] + floor ((diff + (diff*diff >> 14)) * cfilt
 		- ddft[0][c][1] - ddft[0][c][0] * ((float) col/width - 0.5)
-		- black[row][c] );
+		- t_black[row][c] );
       }
       FORC3 {
 	work[0][c] = ipix[c] * ipix[c] >> 14;
@@ -537,13 +580,10 @@ void CLASS foveon_interpolate()
       pix += 4;
     }
   }
-  free (black);
+  free (t_black);
   free (sgrow);
   free (sgain);
 
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,3,9);
-#endif
   if ((badpix = (unsigned int *) foveon_camf_matrix (dim, "BadPixels"))) {
     for (i=0; i < dim[0]; i++) {
       col = (badpix[i] >> 8 & 0xfff) - keep[0];
@@ -595,9 +635,6 @@ void CLASS foveon_interpolate()
     }
   }
 
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,4,9);
-#endif
   /* Adjust the brighter pixels for better linearity */
   min = 0xffff;
   FORC3 {
@@ -627,9 +664,6 @@ void CLASS foveon_interpolate()
    the sum R+G+B is much less noisy than the individual colors.
    So smooth the hues without smoothing the total.
  */
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,5,9);
-#endif
   for (smlast=-1, row=2; row < height-2; row++) {
     while (smlast < row+2) {
       for (i=0; i < 6; i++)
@@ -642,7 +676,7 @@ void CLASS foveon_interpolate()
     }
     pix = image[row*width+2];
     for (col=2; col < width-2; col++) {
-      FORC3 dev[c] = -foveon_apply_curve (curve[7], pix[c] -
+      FORC3 dev[c] = -foveon_apply_curve (t_curve[7], pix[c] -
 	((smrow[1][col][c] + 2*smrow[2][col][c] + smrow[3][col][c]) >> 2));
       sum = (dev[0] + dev[1] + dev[2]) >> 3;
       FORC3 pix[c] += dev[c] - sum;
@@ -670,20 +704,17 @@ void CLASS foveon_interpolate()
       }
       if (sum < 0) sum = 0;
       j = total[3] > 375 ? (sum << 16) / total[3] : sum * 174;
-      FORC3 pix[c] += foveon_apply_curve (curve[6],
+      FORC3 pix[c] += foveon_apply_curve (t_curve[6],
 		((j*total[c] + 0x8000) >> 16) - pix[c]);
       pix += 4;
     }
   }
 
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,6,9);
-#endif
   /* Transform the image to a different colorspace */
   for (pix=image[0]; pix < image[height*width]; pix+=4) {
-    FORC3 pix[c] -= foveon_apply_curve (curve[c], pix[c]);
+    FORC3 pix[c] -= foveon_apply_curve (t_curve[c], pix[c]);
     sum = (pix[0]+pix[1]+pix[1]+pix[2]) >> 2;
-    FORC3 pix[c] -= foveon_apply_curve (curve[c], pix[c]-sum);
+    FORC3 pix[c] -= foveon_apply_curve (t_curve[c], pix[c]-sum);
     FORC3 {
       for (dsum=i=0; i < 3; i++)
 	dsum += trans[c][i] * pix[i];
@@ -695,8 +726,8 @@ void CLASS foveon_interpolate()
   }
 
   /* Smooth the image bottom-to-top and save at 1/4 scale */
-  shrink = (short (*)[3]) calloc ((width/4) * (height/4), sizeof *shrink);
-  merror (shrink, "foveon_interpolate()");
+  t_shrink = (short (*)[3]) calloc ((width/4) * (height/4), sizeof *t_shrink);
+  merror (t_shrink, "foveon_interpolate()");
   for (row = height/4; row--; )
     for (col=0; col < width/4; col++) {
       ipix[0] = ipix[1] = ipix[2] = 0;
@@ -705,21 +736,18 @@ void CLASS foveon_interpolate()
 	  FORC3 ipix[c] += image[(row*4+i)*width+col*4+j][c];
       FORC3
 	if (row+2 > height/4)
-	  shrink[row*(width/4)+col][c] = ipix[c] >> 4;
+	  t_shrink[row*(width/4)+col][c] = ipix[c] >> 4;
 	else
-	  shrink[row*(width/4)+col][c] =
-	    (shrink[(row+1)*(width/4)+col][c]*1840 + ipix[c]*141 + 2048) >> 12;
+	  t_shrink[row*(width/4)+col][c] =
+	    (t_shrink[(row+1)*(width/4)+col][c]*1840 + ipix[c]*141 + 2048) >> 12;
     }
   /* From the 1/4-scale image, smooth right-to-left */
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,7,9);
-#endif
   for (row=0; row < (height & ~3); row++) {
     ipix[0] = ipix[1] = ipix[2] = 0;
     if ((row & 3) == 0)
       for (col = width & ~3 ; col--; )
 	FORC3 smrow[0][col][c] = ipix[c] =
-	  (shrink[(row/4)*(width/4)+col/4][c]*1485 + ipix[c]*6707 + 4096) >> 13;
+	  (t_shrink[(row/4)*(width/4)+col/4][c]*1485 + ipix[c]*6707 + 4096) >> 13;
 
   /* Then smooth left-to-right */
     ipix[0] = ipix[1] = ipix[2] = 0;
@@ -743,7 +771,7 @@ void CLASS foveon_interpolate()
       }
       j = (j << 16) / i;
       for (sum=c=0; c < 3; c++) {
-	ipix[c] = foveon_apply_curve (curve[c+3],
+	ipix[c] = foveon_apply_curve (t_curve[c+3],
 	  ((smrow[2][col][c] * j + 0x8000) >> 16) - image[row*width+col][c]);
 	sum += ipix[c];
       }
@@ -755,13 +783,10 @@ void CLASS foveon_interpolate()
       }
     }
   }
-  free (shrink);
+  free (t_shrink);
   free (smrow[6]);
   for (i=0; i < 8; i++)
-    free (curve[i]);
-#ifdef LIBRAW_LIBRARY_BUILD
-  RUN_CALLBACK(LIBRAW_PROGRESS_FOVEON_INTERPOLATE,8,9);
-#endif
+    free (t_curve[i]);
 
   /* Trim off the black border */
   active[1] -= keep[1];
@@ -774,103 +799,9 @@ void CLASS foveon_interpolate()
   height = row;
 }
 #undef image
+#ifdef LIBRAW_LIBRARY_BUILD
+#define image           (imgdata.image)
+#endif
 
 /* RESTRICTED code ends here */
-
-
-char * CLASS foveon_gets (int offset, char *str, int len)
-{
-  int i;
-  fseek (ifp, offset, SEEK_SET);
-  for (i=0; i < len-1; i++)
-    if ((str[i] = get2()) == 0) break;
-  str[i] = 0;
-  return str;
-}
-
-void CLASS parse_foveon()
-{
-  int entries, img=0, off, len, tag, save, i, wide, high, pent, poff[256][2];
-  char name[64], value[64];
-
-  order = 0x4949;			/* Little-endian */
-  fseek (ifp, 36, SEEK_SET);
-  flip = get4();
-  fseek (ifp, -4, SEEK_END);
-  fseek (ifp, get4(), SEEK_SET);
-  if (get4() != 0x64434553) return;	/* SECd */
-  entries = (get4(),get4());
-  while (entries--) {
-    off = get4();
-    len = get4();
-    tag = get4();
-    save = ftell(ifp);
-    fseek (ifp, off, SEEK_SET);
-    if (get4() != (0x20434553 | (tag << 24))) return;
-    switch (tag) {
-      case 0x47414d49:			/* IMAG */
-      case 0x32414d49:			/* IMA2 */
-	fseek (ifp, 12, SEEK_CUR);
-	wide = get4();
-	high = get4();
-	if (wide > raw_width && high > raw_height) {
-	  raw_width  = wide;
-	  raw_height = high;
-	  data_offset = off+24;
-	}
-	fseek (ifp, off+28, SEEK_SET);
-	if (fgetc(ifp) == 0xff && fgetc(ifp) == 0xd8
-		&& thumb_length < len-28) {
-	  thumb_offset = off+28;
-	  thumb_length = len-28;
-	  write_thumb = &CLASS jpeg_thumb;
-	}
-	if (++img == 2 && !thumb_length) {
-	  thumb_offset = off+24;
-	  thumb_width = wide;
-	  thumb_height = high;
-	  write_thumb = &CLASS foveon_thumb;
-	}
-	break;
-      case 0x464d4143:			/* CAMF */
-	meta_offset = off+24;
-	meta_length = len-28;
-	if (meta_length > 0x20000)
-	    meta_length = 0x20000;
-	break;
-      case 0x504f5250:			/* PROP */
-	pent = (get4(),get4());
-	fseek (ifp, 12, SEEK_CUR);
-	off += pent*8 + 24;
-	if ((unsigned) pent > 256) pent=256;
-	for (i=0; i < pent*2; i++)
-	  poff[0][i] = off + get4()*2;
-	for (i=0; i < pent; i++) {
-	  foveon_gets (poff[i][0], name, 64);
-	  foveon_gets (poff[i][1], value, 64);
-	  if (!strcmp (name, "ISO"))
-	    iso_speed = atoi(value);
-	  if (!strcmp (name, "CAMMANUF"))
-	    strcpy (make, value);
-	  if (!strcmp (name, "CAMMODEL"))
-	    strcpy (model, value);
-	  if (!strcmp (name, "WB_DESC"))
-	    strcpy (model2, value);
-	  if (!strcmp (name, "TIME"))
-	    timestamp = atoi(value);
-	  if (!strcmp (name, "EXPTIME"))
-	    shutter = atoi(value) / 1000000.0;
-	  if (!strcmp (name, "APERTURE"))
-	    aperture = atof(value);
-	  if (!strcmp (name, "FLENGTH"))
-	    focal_len = atof(value);
-	}
-#ifdef LOCALTIME
-	timestamp = mktime (gmtime (&timestamp));
-#endif
-    }
-    fseek (ifp, save, SEEK_SET);
-  }
-  is_foveon = 1;
-}
 

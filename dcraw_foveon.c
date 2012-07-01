@@ -214,7 +214,7 @@ void CLASS foveon_huff (ushort *huff)
 void CLASS foveon_dp_load_raw()
 {
   unsigned c, roff[4], row, col, diff;
-  ushort huff[258], vpred, hpred;
+  ushort huff[258], vpred[2][2], hpred[2];
 
   fseek (ifp, 8, SEEK_CUR);
   foveon_huff (huff);
@@ -223,13 +223,13 @@ void CLASS foveon_dp_load_raw()
   FORC3 {
     fseek (ifp, data_offset+roff[c], SEEK_SET);
     getbits(-1);
-    vpred = 1024;
+    vpred[0][0] = vpred[0][1] = vpred[1][0] = vpred[1][1] = 512;
     for (row=0; row < height; row++) {
       for (col=0; col < width; col++) {
 	diff = ljpeg_diff(huff);
-	if (col) hpred += diff;
-	else hpred = vpred += diff;
-	image[row*width+col][c] = hpred;
+	if (col < 2) hpred[col] = vpred[row & 1][col] += diff;
+	else hpred[col & 1] += diff;
+	image[row*width+col][c] = hpred[col & 1];
       }
     }
   }

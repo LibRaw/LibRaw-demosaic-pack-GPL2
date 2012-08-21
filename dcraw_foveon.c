@@ -789,14 +789,37 @@ void CLASS foveon_interpolate()
     free (t_curve[i]);
 
   /* Trim off the black border */
-  active[1] -= keep[1];
-  active[3] -= 2;
+  if (~cropbox[2] && ~cropbox[3])
+    {
+      // Image already cropped, do nothing
+      int crop[4],c;
+      for(int c=0;c<4;c++) 
+        {
+          crop[c] = cropbox[c];
+          if(crop[c]<0)
+            crop[c]=0;
+        }
+      if(crop[0]>=width-1) crop[0] = width - 2;
+      if(crop[1]>=height-1) crop[1] = height-2;
+      if(crop[0]+crop[2] >= width) crop[2] = width-crop[0];
+      if(crop[1]+crop[3] >= height) crop[3] = height-crop[1];
+      active[0] = crop[0];
+      active[1] = crop[1];
+      active[2] = crop[0]+crop[2];
+      active[3] = crop[1]+crop[3];
+    }
+  else
+    {
+      active[1] -= keep[1];
+      active[3] -= 2;
+    }
   i = active[2] - active[0];
   for (row=0; row < active[3]-active[1]; row++)
     memcpy (image[row*i], image[(row+active[1])*width+active[0]],
-	 i * sizeof *image);
+            i * sizeof *image);
   width = i;
   height = row;
+
 }
 #undef image
 #ifdef LIBRAW_LIBRARY_BUILD

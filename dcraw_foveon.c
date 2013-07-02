@@ -1,6 +1,6 @@
 /*
    dcraw.c -- Dave Coffin's raw photo decoder
-   Copyright 1997-2012 by Dave Coffin, dcoffin a cybercom o net
+   Copyright 1997-2013 by Dave Coffin, dcoffin a cybercom o net
 
    This is a command-line ANSI C program to convert raw photos from
    any digital camera on any computer running any operating system.
@@ -19,8 +19,8 @@
    *If you have not modified dcraw.c in any way, a link to my
    homepage qualifies as "full source code".
 
-   $Revision: 1.449 $
-   $Date: 2012/06/26 02:43:41 $
+   $Revision: 1.456 $
+   $Date: 2013/06/16 18:01:08 $
  */
 
 #define getbits(n) getbithuff(n,0)
@@ -214,7 +214,7 @@ void CLASS foveon_huff (ushort *huff)
 void CLASS foveon_dp_load_raw()
 {
   unsigned c, roff[4], row, col, diff;
-  ushort huff[258], vpred[2][2], hpred[2];
+  ushort huff[512], vpred[2][2], hpred[2];
 
   fseek (ifp, 8, SEEK_CUR);
   foveon_huff (huff);

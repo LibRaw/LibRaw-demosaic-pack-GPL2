@@ -175,6 +175,9 @@ void CLASS foveon_sd_load_raw()
   if (!load_flags) foveon_decoder (1024, 0);
 
   for (row=0; row < height; row++) {
+#ifdef LIBRAW_LIBRARY_BUILD
+    checkCancel();
+#endif
     memset (pred, 0, sizeof pred);
     if (!bit && !load_flags && atoi(model+2) < 14) get4();
     for (col=bit=0; col < width; col++) {
@@ -225,6 +228,9 @@ void CLASS foveon_dp_load_raw()
     getbits(-1);
     vpred[0][0] = vpred[0][1] = vpred[1][0] = vpred[1][1] = 512;
     for (row=0; row < height; row++) {
+#ifdef LIBRAW_LIBRARY_BUILD
+    checkCancel();
+#endif
       for (col=0; col < width; col++) {
 	diff = ljpeg_diff(huff);
 	if (col < 2) hpred[col] = vpred[row & 1][col] += diff;

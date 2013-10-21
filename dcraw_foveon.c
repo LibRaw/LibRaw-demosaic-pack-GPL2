@@ -124,10 +124,6 @@ void CLASS parse_foveon()
     }
     fseek (ifp, save, SEEK_SET);
   }
-#ifndef LIBRAW_DEMOSAIC_PACK_GPL2
-  raw_color=1; // Force adobe coeff
-  maximum=0x3fff; // To be reset by color table
-#endif
 }
 
 
